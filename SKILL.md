@@ -33,11 +33,40 @@ This skill lives in the directory containing this SKILL.md file. Determine the b
 - `<skill-dir>/config/servers.json` — Server credentials (never expose to user)
 - `<skill-dir>/templates/` — Server setup scripts
 
-## Critical knowledge: How auto-deploy works
+## Critical knowledge: GitHub App integration
 
 Dokploy has a built-in GitHub App integration. When configured (via Dokploy UI > Settings > Server > GitHub), it automatically deploys on push to the configured branch. **No webhooks, no manual refresh tokens, no GitHub Actions needed.**
 
-This means:
+### Setting repository source (CRITICAL)
+
+When configuring an application's GitHub repository, you **MUST** use the dedicated GitHub App endpoint:
+
+```bash
+# CORRECT — uses GitHub App (supports private repos)
+bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
+  "owner": "<github-owner>",
+  "repo": "<repo-name>",
+  "branch": "main"
+}'
+
+# For docker-compose projects:
+bash scripts/dokploy-api.sh "$SERVER" PUT "compose/${COMPOSE_ID}/github" '{
+  "owner": "<github-owner>",
+  "repo": "<repo-name>",
+  "branch": "main"
+}'
+```
+
+**DO NOT** use `application.update` with `sourceType: "github"` — that routes through plain git clone and cannot access private repos.
+
+Parse owner/repo from GitHub URL:
+```bash
+OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/([^/]+)/.*|\1|')
+REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/[^/]+/([^/.]+).*|\1|')
+```
+
+### Auto-deploy behavior
+
 - After initial deploy via this skill, subsequent pushes to `main` trigger auto-deploy automatically
 - You do NOT need to set up webhooks or refresh tokens
 - You do NOT need to configure GitHub Actions for deployment

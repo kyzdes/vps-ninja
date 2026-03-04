@@ -24,6 +24,18 @@ Dokploy has a **built-in GitHub App integration** that handles auto-deploy nativ
 
 After this, when creating applications in Dokploy, you can select repositories from the GitHub App dropdown — no manual URL entry needed.
 
+**API integration:** Use `PUT /api/applications/{id}/github` with `owner` and `repo` (not a full URL). This endpoint leverages the installed GitHub App for authentication and supports private repositories automatically.
+
+```bash
+bash scripts/dokploy-api.sh <server> PUT "applications/${APP_ID}/github" '{
+  "owner": "github-user-or-org",
+  "repo": "repo-name",
+  "branch": "main"
+}'
+```
+
+> **DO NOT** use `application.update` with `sourceType: "github"` — that uses plain git clone and cannot access private repos via the GitHub App.
+
 ## How auto-deploy triggers
 
 1. Developer pushes code to the configured branch (e.g., `main`)

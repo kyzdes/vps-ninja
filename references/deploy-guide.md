@@ -381,17 +381,36 @@ RESPONSE=$(bash scripts/dokploy-api.sh "$SERVER" POST compose.create '{
 COMPOSE_ID=$(echo "$RESPONSE" | jq -r '.composeId')
 ```
 
-### 3.4 Настроить Git-репозиторий
+### 3.4 Настроить Git-репозиторий (GitHub App)
+
+Парсинг owner/repo из GitHub URL:
+```bash
+# Извлечь owner и repo из URL
+# https://github.com/user/repo → owner=user, repo=repo
+OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/([^/]+)/.*|\1|')
+REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/[^/]+/([^/.]+).*|\1|')
+```
+
+> **КРИТИЧЕСКИ ВАЖНО:** Используй эндпоинт `PUT applications/{id}/github` (GitHub App), а НЕ `POST application.update` с `sourceType: "github"`.
+> Эндпоинт `application.update` маршрутизирует через обычный git clone, который не имеет доступа к приватным репозиториям.
+> Эндпоинт `applications/{id}/github` использует установленный GitHub App для аутентификации.
 
 ```bash
-bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
-  "applicationId": "'"$APP_ID"'",
-  "sourceType": "github",
-  "repository": "'"$GITHUB_URL"'",
-  "branch": "'"$BRANCH"'",
-  "autoDeploy": false
+bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
+  "owner": "'"$OWNER"'",
+  "repo": "'"$REPO"'",
+  "branch": "'"$BRANCH"'"
 }'
 ```
+
+> **Для Docker Compose проектов из GitHub** используй аналогичный эндпоинт:
+> ```bash
+> bash scripts/dokploy-api.sh "$SERVER" PUT "compose/${COMPOSE_ID}/github" '{
+>   "owner": "'"$OWNER"'",
+>   "repo": "'"$REPO"'",
+>   "branch": "'"$BRANCH"'"
+> }'
+> ```
 
 ### 3.5 Установить тип билда
 
@@ -589,9 +608,9 @@ Next steps:
 ```
 
 После настройки GitHub App:
-- `sourceType: "github"` работает с приватными репо
+- Эндпоинт `PUT applications/{id}/github` с `owner`/`repo`/`branch` работает с приватными репо
 - Автодеплой через GitHub App webhooks (не нужен отдельный webhook)
-- Для выбора репо используй owner/repo/branch прямо в Dokploy
+- GitHub App обеспечивает аутентификацию автоматически — не нужны PAT или SSH ключи
 
 ### Вариант B: GitHub Personal Access Token (Classic)
 
@@ -611,16 +630,16 @@ Next steps:
 # Клонировать для анализа
 git clone --depth 1 "https://$GITHUB_PAT@github.com/$OWNER/$REPO.git" "$TEMP_DIR"
 
-# Настроить в Dokploy через customGitUrl
-bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
-  "applicationId": "'"$APP_ID"'",
-  "sourceType": "github",
-  "customGitUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
+# Настроить в Dokploy через git-эндпоинт с customGitUrl
+bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/git" '{
+  "provider": "github",
+  "repositoryUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
   "branch": "'"$BRANCH"'"
 }'
 ```
 
-> **Примечание:** Токен сохраняется в Dokploy. Ротация — вручную. При истечении токена деплой перестанет работать.
+> **Примечание:** Это использует git-эндпоинт (не GitHub App). Токен сохраняется в Dokploy. Ротация — вручную. При истечении токена деплой перестанет работать.
+> **Рекомендация:** Лучше настроить GitHub App (Вариант A) — тогда можно использовать `PUT applications/{id}/github`.
 
 ### Вариант C (fallback): Локальная сборка + Docker Compose raw
 
@@ -855,7 +874,16 @@ bash scripts/cloudflare-dns.sh create "$DOMAIN" "$SERVER_IP" true
 
 2. Используй `compose.create` вместо `application.create`
 
-3. Для настройки доменов — либо через Dokploy UI, либо добавь Traefik labels в compose:
+3. Настрой GitHub через GitHub App эндпоинт (аналогично обычным приложениям):
+   ```bash
+   bash scripts/dokploy-api.sh "$SERVER" PUT "compose/${COMPOSE_ID}/github" '{
+     "owner": "'"$OWNER"'",
+     "repo": "'"$REPO"'",
+     "branch": "'"$BRANCH"'"
+   }'
+   ```
+
+4. Для настройки доменов — либо через Dokploy UI, либо добавь Traefik labels в compose:
    ```yaml
    labels:
      - "traefik.enable=true"

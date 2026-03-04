@@ -381,15 +381,21 @@ RESPONSE=$(bash scripts/dokploy-api.sh "$SERVER" POST compose.create '{
 COMPOSE_ID=$(echo "$RESPONSE" | jq -r '.composeId')
 ```
 
-### 3.4 Настроить Git-репозиторий
+### 3.4 Настроить Git-репозиторий (GitHub App)
+
+Парсинг owner/repo из GitHub URL:
+```bash
+OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/([^/]+)/.*|\1|')
+REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/[^/]+/([^/.]+).*|\1|')
+```
+
+> **КРИТИЧЕСКИ ВАЖНО:** Используй `PUT applications/{id}/github` (GitHub App), а НЕ `application.update` с `sourceType`.
 
 ```bash
-bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
-  "applicationId": "'"$APP_ID"'",
-  "sourceType": "github",
-  "repository": "'"$GITHUB_URL"'",
-  "branch": "'"$BRANCH"'",
-  "autoDeploy": false
+bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
+  "owner": "'"$OWNER"'",
+  "repo": "'"$REPO"'",
+  "branch": "'"$BRANCH"'"
 }'
 ```
 
@@ -589,9 +595,9 @@ Next steps:
 ```
 
 После настройки GitHub App:
-- `sourceType: "github"` работает с приватными репо
+- Эндпоинт `PUT applications/{id}/github` с `owner`/`repo`/`branch` работает с приватными репо
 - Автодеплой через GitHub App webhooks (не нужен отдельный webhook)
-- Для выбора репо используй owner/repo/branch прямо в Dokploy
+- GitHub App обеспечивает аутентификацию автоматически
 
 ### Вариант B: GitHub Personal Access Token (Classic)
 
@@ -611,16 +617,15 @@ Next steps:
 # Клонировать для анализа
 git clone --depth 1 "https://$GITHUB_PAT@github.com/$OWNER/$REPO.git" "$TEMP_DIR"
 
-# Настроить в Dokploy через customGitUrl
-bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
-  "applicationId": "'"$APP_ID"'",
-  "sourceType": "github",
-  "customGitUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
+# Настроить в Dokploy через git-эндпоинт с PAT в URL
+bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/git" '{
+  "provider": "github",
+  "repositoryUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
   "branch": "'"$BRANCH"'"
 }'
 ```
 
-> **Примечание:** Токен сохраняется в Dokploy. Ротация — вручную. При истечении токена деплой перестанет работать.
+> **Примечание:** Это git-эндпоинт (не GitHub App). Токен сохраняется в Dokploy. Рекомендуется Вариант A с GitHub App.
 
 ### Вариант C (fallback): Локальная сборка + Docker Compose raw
 

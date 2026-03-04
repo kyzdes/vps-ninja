@@ -146,28 +146,74 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 
 ### `POST application.update`
 
-Обновить настройки приложения (Git-репозиторий, ветка, autoDeploy и т.д.).
+Обновить настройки приложения (autoDeploy и другие флаги).
+
+> **ВАЖНО:** Для настройки Git-репозитория используй отдельные эндпоинты `PUT applications/{id}/github` или `PUT applications/{id}/git` (см. ниже). НЕ используй `application.update` с `sourceType` — это работает через обычный git clone без GitHub App аутентификации.
 
 **Request:**
 ```json
 {
   "applicationId": "app1",
-  "sourceType": "github",
-  "repository": "https://github.com/user/repo",
-  "branch": "main",
-  "autoDeploy": false
+  "autoDeploy": true
+}
+```
+
+### `PUT applications/{id}/github` (GitHub App)
+
+Настроить GitHub-репозиторий через GitHub App. Использует установленный GitHub App для аутентификации — **работает с приватными репозиториями**.
+
+> **Это основной эндпоинт для GitHub-репозиториев.** Требует установленный GitHub App в Dokploy (Settings > Server > GitHub).
+
+**Request:**
+```json
+{
+  "owner": "user",
+  "repo": "my-app",
+  "branch": "main"
+}
+```
+
+**Response:**
+```json
+{
+  "message": "GitHub configuration saved successfully."
+}
+```
+
+**Пример использования:**
+```bash
+bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
+  "owner": "user",
+  "repo": "my-app",
+  "branch": "main"
+}'
+```
+
+### `PUT applications/{id}/git` (Generic Git)
+
+Настроить Git-репозиторий через обычный git clone. Для приватных репозиториев требует PAT в URL или SSH-ключ.
+
+> **Используй только если GitHub App не установлен** (fallback). Для GitHub-репозиториев предпочтительно использовать `PUT applications/{id}/github`.
+
+**Request:**
+```json
+{
+  "provider": "github",
+  "repositoryUrl": "https://github.com/user/repo.git",
+  "branch": "main"
 }
 ```
 
 **Для приватных репозиториев через PAT:**
 ```json
 {
-  "applicationId": "app1",
-  "sourceType": "github",
-  "customGitUrl": "https://<github-pat>@github.com/user/repo.git",
+  "provider": "github",
+  "repositoryUrl": "https://<github-pat>@github.com/user/repo.git",
   "branch": "main"
 }
 ```
+
+**Поддерживаемые провайдеры:** `github`, `gitlab`, `bitbucket`, `gitea`
 
 ### `POST application.saveBuildType`
 
@@ -326,20 +372,33 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 }
 ```
 
-### `POST compose.update`
+### `PUT compose/{id}/github` (GitHub App)
 
-Обновить настройки compose-проекта.
+Настроить GitHub-репозиторий для compose-проекта через GitHub App.
 
-**Для GitHub-репозитория:**
+**Request:**
 ```json
 {
-  "composeId": "comp1",
-  "sourceType": "github",
-  "repository": "https://github.com/user/repo",
-  "branch": "main",
-  "composePath": "docker-compose.yml"
+  "owner": "user",
+  "repo": "my-app",
+  "branch": "main"
 }
 ```
+
+**Пример:**
+```bash
+bash scripts/dokploy-api.sh main PUT "compose/${COMPOSE_ID}/github" '{
+  "owner": "user",
+  "repo": "my-app",
+  "branch": "main"
+}'
+```
+
+### `POST compose.update`
+
+Обновить настройки compose-проекта (composePath, raw YAML и другие флаги).
+
+> **ВАЖНО:** Для настройки GitHub-репозитория используй `PUT compose/{id}/github`. Не используй `compose.update` с `sourceType: "github"` — это работает через обычный git clone.
 
 **Для raw-режима (inline YAML):**
 ```json
@@ -701,11 +760,10 @@ APP=$(bash scripts/dokploy-api.sh main POST application.create '{
 }')
 APP_ID=$(echo "$APP" | jq -r '.applicationId')
 
-# 6. Настроить Git
-bash scripts/dokploy-api.sh main POST application.update '{
-  "applicationId":"'"$APP_ID"'",
-  "sourceType":"github",
-  "repository":"https://github.com/user/my-saas",
+# 6. Настроить GitHub (через GitHub App)
+bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
+  "owner":"user",
+  "repo":"my-saas",
   "branch":"main"
 }'
 
