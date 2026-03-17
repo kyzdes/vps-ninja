@@ -67,17 +67,19 @@ Claude will detect your stack (Next.js, Django, Go, etc.), create the project in
 | Command | What it does |
 |:--------|:------------|
 | `/vps setup <ip> <password>` | Set up a fresh VPS with Dokploy |
-| `/vps deploy <github-url> [--domain D]` | Deploy a GitHub project |
-| `/vps domain add <domain> <project>` | Add domain to a project |
+| `/vps deploy <github-url> [--domain D] [--dry-run]` | Deploy a GitHub project |
+| `/vps domain add <domain> <project> [--server S]` | Add domain to a project |
 | `/vps domain remove <domain>` | Remove domain |
 | `/vps domain list` | List all domains |
-| `/vps db create <type> <name>` | Create database (postgres/mysql/mongo/redis) |
+| `/vps db create <type> <name> [--server S]` | Create database (postgres/mysql/mongo/redis) |
 | `/vps db list` | List all databases |
 | `/vps db delete <name>` | Delete database |
-| `/vps status` | Server and project status |
+| `/vps status [--server <name>]` | Server and project status + resource warnings |
 | `/vps logs <project> [--build]` | View runtime or build logs |
-| `/vps destroy <project>` | Delete a project |
+| `/vps destroy <project> [--server S]` | Delete a project |
 | `/vps config` | Show current configuration |
+
+All commands support `[--server <name>]` to target a specific server when multiple are configured.
 
 ## Supported Stacks
 
@@ -162,19 +164,29 @@ Full benchmark results: [`benchmarks/BENCHMARK.md`](benchmarks/BENCHMARK.md) | [
 
 ### v3.1 (current)
 
-Reliability update based on real-world deployment failures (14 issues fixed).
+Reliability and security update based on real-world deployment failures and comprehensive skill review.
 
+**Deployment reliability (v3.1.0):**
 - **Fixed GitHub App integration** — replaced non-existent REST endpoints (`PUT applications/{id}/github`) with correct tRPC calls (`application.saveGithubProvider` + `gitProvider.getAll`)
 - **4-tier deployment fallback chain** — GitHub App → public git → PAT git → manual Docker build
 - **Server-side repo accessibility check** — validates server can clone before choosing strategy
 - **Fixed all API field names** — `composeFile` (not `customCompose`), complete `saveBuildType` (7 fields) and `saveEnvironment` (5 fields) payloads
 - **Fixed HTTP methods** — all mutations correctly documented as POST (tRPC, not REST)
 - **SSH long-running command support** — `--bg`/`--poll` modes with nohup for Docker builds
-- **Manual Docker deploy guide** — new reference doc for deploying without GitHub integration
+- **Manual Docker deploy guide** — new reference doc with Dockerfile templates for Next.js, Node.js, Vite
 - **Next.js Node.js version detection** — auto-sets `NIXPACKS_NODE_VERSION` for Next.js 15+/16+
-- **Deployment log fallback** — SSH + `logPath` as primary, API as fallback
-- **Enhanced troubleshooting** — new sections for Zod errors, GitHub provider issues, SSH drops, compose field name
 - **Dynamic API timeouts** — 60s for mutation endpoints (was 30s for all)
+
+**Security and quality (v3.1.1):**
+- **Fixed command injection** in ssh-exec.sh `--bg`/`--poll` modes (single-quote escaping)
+- **Password no longer in process list** — uses `SSHPASS` env var instead of `-p` flag
+- **DRY refactor of ssh-exec.sh** — extracted `_load_server_config()` and `_run_ssh()` helpers
+- **CloudFlare multi-part TLD support** — handles `.co.uk`, `.com.br` etc. via API fallback
+- **`--dry-run` mode** for deploy — preview what will happen before executing
+- **`--server` flag** on all commands for multi-server setups
+- **Resource warnings** in `/vps status` — disk >80%, RAM >90%, Docker image accumulation
+- **Rollback documentation** — how to revert a broken deployment
+- **Smoke test** after manual Docker deploy
 
 ### v3
 
@@ -208,6 +220,9 @@ Initial release.
 
 - `config/servers.json` is **never committed** to git (gitignored)
 - API keys and passwords are **never shown** in Claude's responses
+- SSH passwords passed via `SSHPASS` env var (not visible in `ps` output)
+- Command injection prevention in SSH background mode (single-quote escaping)
+- SSH key paths stripped from `/vps config` display
 - Destructive operations (`destroy`, `db delete`) always require confirmation
 
 ## License
