@@ -216,3 +216,91 @@ API key might be expired or invalid. User needs to:
 2. Settings > Profile > API/CLI
 3. Generate new API key
 4. Update config: `/vps config server add <name> <ip>` (re-add with new key)
+
+---
+
+## SSH Connection Drops During Long Operations
+
+### Проблема
+При выполнении длительных команд через SSH (docker build, apt upgrade) соединение обрывается через 1-2 минуты.
+
+### Решение: --bg режим ssh-exec.sh
+
+```bash
+# Запуск команды в фоне
+bash scripts/ssh-exec.sh --bg "$SERVER" "docker build -t myapp:latest ." "/tmp/build.log"
+
+# Опрос статуса
+bash scripts/ssh-exec.sh --poll "$SERVER" "docker build" "/tmp/build.log"
+# Возвращает: {"status": "running"} или {"status": "done", "log_tail": "..."}
+```
+
+SSH_OPTS в v3.1 включают `ServerAliveInterval=15` для предотвращения таймаутов.
+
+---
+
+## "Github Provider not found" Error
+
+### Причина
+Вызван `application.update` с `sourceType: "github"` без предварительной настройки провайдера через `application.saveGithubProvider`.
+
+### Решение
+1. Проверить установлен ли GitHub App: `GET gitProvider.getAll`
+2. Если установлен: использовать `application.saveGithubProvider` с `githubId`
+3. Если НЕ установлен: использовать `sourceType: "git"` с `customGitUrl`
+
+---
+
+## Zod Validation Errors (HTTP 400 с fieldErrors)
+
+### Причина
+Dokploy использует Zod для валидации. Когда обязательное поле отсутствует:
+```json
+{
+  "fieldErrors": {
+    "dockerfile": "Invalid input: expected nonoptional, received undefined"
+  }
+}
+```
+
+### Частые пропущенные поля
+
+| Endpoint | Пропущенные поля | Дефолтные значения |
+|----------|-----------------|-------------------|
+| `application.saveBuildType` | `dockerfile`, `herokuVersion`, `railpackVersion` | `"Dockerfile"`, `"24"`, `"0.15.4"` |
+| `application.saveEnvironment` | `buildArgs`, `buildSecrets`, `createEnvFile` | `""`, `""`, `true` |
+
+### Решение
+Всегда отправлять ВСЕ обязательные поля с дефолтными значениями.
+
+---
+
+## "Compose file not found" Error
+
+### Причина
+Использовано поле `customCompose` в `compose.update` вместо `composeFile`.
+`customCompose` молча игнорируется — создаётся пустой docker-compose.yml.
+
+### Решение
+Использовать `composeFile` (не `customCompose`):
+```json
+{
+  "composeId": "...",
+  "sourceType": "raw",
+  "composePath": "docker-compose.yml",
+  "composeFile": "<escaped YAML string>"
+}
+```
+
+---
+
+## Приватный репо не обнаружен (ложный публичный доступ)
+
+### Проблема
+`git ls-remote` работает локально (сохранённые GitHub credentials), но сервер не может клонировать.
+
+### Решение
+Всегда проверять доступность с СЕРВЕРА:
+```bash
+SERVER_ACCESS=$(bash scripts/ssh-exec.sh "$SERVER" "GIT_TERMINAL_PROMPT=0 git ls-remote '$URL' HEAD >/dev/null 2>&1 && echo 0 || echo 1")
+```

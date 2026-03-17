@@ -24,17 +24,27 @@ Dokploy has a **built-in GitHub App integration** that handles auto-deploy nativ
 
 After this, when creating applications in Dokploy, you can select repositories from the GitHub App dropdown — no manual URL entry needed.
 
-**API integration:** Use `PUT /api/applications/{id}/github` with `owner` and `repo` (not a full URL). This endpoint leverages the installed GitHub App for authentication and supports private repositories automatically.
+**API integration:** Use `POST application.saveGithubProvider` with `owner`, `repository`, `branch`, and `githubId` (from `gitProvider.getAll`).
 
 ```bash
-bash scripts/dokploy-api.sh <server> PUT "applications/${APP_ID}/github" '{
+# First, get the GitHub provider ID
+GITHUB_ID=$(bash scripts/dokploy-api.sh <server> GET "gitProvider.getAll" | \
+  jq -r '[.[] | select(.providerType == "github")][0].githubId')
+
+# Then configure the application
+bash scripts/dokploy-api.sh <server> POST application.saveGithubProvider '{
+  "applicationId": "'"$APP_ID"'",
   "owner": "github-user-or-org",
-  "repo": "repo-name",
-  "branch": "main"
+  "repository": "repo-name",
+  "branch": "main",
+  "buildPath": "/",
+  "githubId": "'"$GITHUB_ID"'",
+  "triggerType": "push",
+  "enableSubmodules": false
 }'
 ```
 
-> **DO NOT** use `application.update` with `sourceType: "github"` — that uses plain git clone and cannot access private repos via the GitHub App.
+> **DO NOT** use `application.update` with `sourceType: "github"` — that requires a previously saved GitHub provider and will fail with "Github Provider not found" if `saveGithubProvider` was never called.
 
 ## How auto-deploy triggers
 
@@ -136,3 +146,18 @@ echo "Webhook: $DOKPLOY_URL/api/deploy/$REFRESH_TOKEN"
 ```
 
 But for GitHub with GitHub App installed — this is NOT needed.
+
+---
+
+## What if GitHub App is NOT installed?
+
+If `gitProvider.getAll` returns no GitHub providers:
+
+1. **Option A (recommended):** Guide user to install it via Dokploy UI (Settings > Server > GitHub)
+2. **Option B:** Use `customGitUrl` with public repo URL (via `application.update` with `sourceType: "git"`)
+3. **Option C:** Use `customGitUrl` with PAT for private repos
+4. **Option D:** Manual Docker build + compose raw (see `references/manual-docker-deploy.md`)
+
+Auto-deploy behavior WITHOUT GitHub App:
+- Must use webhook-based auto-deploy (refreshToken URL)
+- Or manual `application.deploy` / `application.redeploy` calls

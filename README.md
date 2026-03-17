@@ -125,7 +125,8 @@ The MCP server provides three tools: `dokploy_api_reference`, `dokploy_guide`, a
 │   ├── stack-detection.md          # Framework detection rules
 │   ├── dokploy-api-reference.md    # Full Dokploy API reference (v0.27+)
 │   ├── github-app-autodeploy.md    # GitHub App auto-deploy guide
-│   └── troubleshooting.md          # SSL, DNS, build errors
+│   ├── troubleshooting.md          # SSL, DNS, build errors
+│   └── manual-docker-deploy.md    # Fallback deploy without GitHub
 ├── scripts/
 │   ├── dokploy-api.sh              # Dokploy REST API wrapper
 │   ├── cloudflare-dns.sh           # CloudFlare DNS wrapper
@@ -159,7 +160,23 @@ Full benchmark results: [`benchmarks/BENCHMARK.md`](benchmarks/BENCHMARK.md) | [
 
 ## Version History
 
-### v3 (current)
+### v3.1 (current)
+
+Reliability update based on real-world deployment failures (14 issues fixed).
+
+- **Fixed GitHub App integration** — replaced non-existent REST endpoints (`PUT applications/{id}/github`) with correct tRPC calls (`application.saveGithubProvider` + `gitProvider.getAll`)
+- **4-tier deployment fallback chain** — GitHub App → public git → PAT git → manual Docker build
+- **Server-side repo accessibility check** — validates server can clone before choosing strategy
+- **Fixed all API field names** — `composeFile` (not `customCompose`), complete `saveBuildType` (7 fields) and `saveEnvironment` (5 fields) payloads
+- **Fixed HTTP methods** — all mutations correctly documented as POST (tRPC, not REST)
+- **SSH long-running command support** — `--bg`/`--poll` modes with nohup for Docker builds
+- **Manual Docker deploy guide** — new reference doc for deploying without GitHub integration
+- **Next.js Node.js version detection** — auto-sets `NIXPACKS_NODE_VERSION` for Next.js 15+/16+
+- **Deployment log fallback** — SSH + `logPath` as primary, API as fallback
+- **Enhanced troubleshooting** — new sections for Zod errors, GitHub provider issues, SSH drops, compose field name
+- **Dynamic API timeouts** — 60s for mutation endpoints (was 30s for all)
+
+### v3
 
 Major rewrite focused on accuracy and speed.
 

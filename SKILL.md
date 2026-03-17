@@ -20,7 +20,7 @@ allowed-tools:
   - Agent
 ---
 
-# VPS Ninja v3 — DevOps Automation Skill
+# VPS Ninja v3.1 — DevOps Automation Skill
 
 You are a DevOps engineer. Your job is to automate VPS server management through Dokploy, CloudFlare DNS, and SSH.
 
@@ -39,25 +39,41 @@ Dokploy has a built-in GitHub App integration. When configured (via Dokploy UI >
 
 ### Setting repository source (CRITICAL)
 
-When configuring an application's GitHub repository, you **MUST** use the dedicated GitHub App endpoint:
+When configuring an application's GitHub repository, first check if the GitHub App is installed:
 
 ```bash
-# CORRECT — uses GitHub App (supports private repos)
-bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
-  "owner": "<github-owner>",
-  "repo": "<repo-name>",
-  "branch": "main"
-}'
+# Step 1: Get GitHub provider ID
+PROVIDERS=$(bash scripts/dokploy-api.sh "$SERVER" GET "gitProvider.getAll")
+GITHUB_ID=$(echo "$PROVIDERS" | jq -r '[.[] | select(.providerType == "github")][0].githubId // empty')
+```
 
-# For docker-compose projects:
-bash scripts/dokploy-api.sh "$SERVER" PUT "compose/${COMPOSE_ID}/github" '{
-  "owner": "<github-owner>",
-  "repo": "<repo-name>",
-  "branch": "main"
+**If GitHub App is installed** (GITHUB_ID is non-empty) — use `saveGithubProvider`:
+```bash
+bash scripts/dokploy-api.sh "$SERVER" POST application.saveGithubProvider '{
+  "applicationId": "'"$APP_ID"'",
+  "owner": "'"$OWNER"'",
+  "repository": "'"$REPO"'",
+  "branch": "main",
+  "buildPath": "/",
+  "githubId": "'"$GITHUB_ID"'",
+  "triggerType": "push",
+  "enableSubmodules": false
 }'
 ```
 
-**DO NOT** use `application.update` with `sourceType: "github"` — that routes through plain git clone and cannot access private repos.
+**If GitHub App is NOT installed** — fall back to `customGitUrl`:
+```bash
+bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
+  "applicationId": "'"$APP_ID"'",
+  "sourceType": "git",
+  "customGitUrl": "https://github.com/'"$OWNER"'/'"$REPO"'.git",
+  "customGitBranch": "main"
+}'
+```
+
+**DO NOT** use `sourceType: "github"` without first calling `saveGithubProvider` — it triggers "Github Provider not found" on deploy.
+
+> **tRPC note:** All Dokploy mutations use HTTP POST. There are NO PUT or DELETE HTTP methods.
 
 Parse owner/repo from GitHub URL:
 ```bash
@@ -75,6 +91,26 @@ REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/[^/]+/([^/.]+).*|\1|')
 
 **If the user asks about auto-deploy**: Explain that it's already handled by the GitHub App installed in Dokploy. If they haven't set it up yet, guide them to Dokploy UI > Settings > Server > GitHub > Install GitHub App.
 
+### Deployment strategy decision tree
+
+Before deploying, determine which path to follow:
+
+1. **Is the GitHub App installed?** (`GET gitProvider.getAll` has `providerType: "github"`)
+   - YES → Use `application.saveGithubProvider` (works for public AND private repos)
+   - NO → Continue to step 2
+
+2. **Is the repo accessible from the server?** (SSH to server + `git ls-remote`)
+   - YES → Use `application.update` with `sourceType: "git"` + `customGitUrl`
+   - NO → Continue to step 3
+
+3. **Does the user have a GitHub PAT?**
+   - YES → Use `customGitUrl` with PAT: `https://<PAT>@github.com/owner/repo.git`
+   - NO → Continue to step 4
+
+4. **Fallback: Manual Docker build + Compose raw**
+   - Clone locally → build Docker image on server → compose raw YAML
+   - See `references/manual-docker-deploy.md`
+
 ## Getting documentation
 
 This skill includes comprehensive Dokploy API reference and guides in `references/`. These are your primary source of truth — read them instead of searching the web.
@@ -86,6 +122,7 @@ This skill includes comprehensive Dokploy API reference and guides in `reference
 4. `references/stack-detection.md` — How to detect project stack/framework
 5. `references/github-app-autodeploy.md` — GitHub App setup and auto-deploy
 6. `references/troubleshooting.md` — SSL, DNS, build errors, common issues
+7. `references/manual-docker-deploy.md` — Fallback deploy without GitHub integration
 
 **If the built-in docs don't cover something** (e.g., a brand-new Dokploy feature), use the Dokploy MCP server if available, or Context7:
 ```
@@ -144,7 +181,7 @@ All scripts are in `<skill-dir>/scripts/`. Always use full paths when calling th
 |:-------|:------|
 | `dokploy-api.sh` | `bash <script> [--extract <jq-path>] <server-name> <METHOD> <endpoint> [json-body]` |
 | `cloudflare-dns.sh` | `bash <script> <action> [args...]` (supports `--no-proxy` for DNS-only) |
-| `ssh-exec.sh` | `bash <script> <server-name> <command>` or `bash <script> --password <pass> <ip> <command>` |
+| `ssh-exec.sh` | `bash <script> <server-name> <command>` or `--bg <server> <cmd> [log]` or `--poll <server> <pattern> [log]` |
 | `wait-ready.sh` | `bash <script> <url> [timeout] [interval]` |
 
 ### 3. Security
@@ -307,7 +344,7 @@ Key improvements in v3:
 ## Help (when $ARGUMENTS is empty)
 
 ```
-VPS Ninja v3 — VPS automation with Dokploy
+VPS Ninja v3.1 — VPS automation with Dokploy
 
 Commands:
 

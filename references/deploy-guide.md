@@ -28,14 +28,28 @@ https://github.com/user/repo → https://github.com/user/repo
 
 ### 1.1 Проверка доступности репозитория
 
-Перед клонированием проверь, приватный ли репозиторий:
-
+**Step 1: Локальная проверка**
 ```bash
-# Проверить доступность через git ls-remote
 git ls-remote --exit-code "$GITHUB_URL" >/dev/null 2>&1
+LOCAL_ACCESS=$?
 ```
 
-Если команда вернула ошибку → репо приватный или не существует. См. секцию "Приватные репозитории" ниже.
+**Step 2: Проверка с сервера** (КРИТИЧЕСКИ ВАЖНО: сервер тоже должен иметь доступ)
+```bash
+SERVER_ACCESS=$(bash scripts/ssh-exec.sh "$SERVER" "GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code '$GITHUB_URL' HEAD >/dev/null 2>&1 && echo 0 || echo 1")
+```
+
+**Step 3: Определение видимости**
+
+| LOCAL_ACCESS | SERVER_ACCESS | Результат |
+|:------------|:-------------|:----------|
+| 0 | 0 | Публичный репо — деплой через Path A/B |
+| 0 | 1 | Приватный репо (локально есть кеш. креды, на сервере нет) |
+| 1 | — | Репо не существует или недоступен |
+
+> **ВАЖНО:** Никогда не доверяй только локальному `git ls-remote` для определения того, сможет ли сервер клонировать репо. Локальная машина может иметь сохранённые GitHub credentials, которых нет на сервере.
+
+Если репо приватный → см. секцию "Приватные репозитории" ниже.
 
 ### 1.2 Клонирование репозитория
 
@@ -381,36 +395,67 @@ RESPONSE=$(bash scripts/dokploy-api.sh "$SERVER" POST compose.create '{
 COMPOSE_ID=$(echo "$RESPONSE" | jq -r '.composeId')
 ```
 
-### 3.4 Настроить Git-репозиторий (GitHub App)
+### 3.4 Настроить Git-репозиторий
 
 Парсинг owner/repo из GitHub URL:
 ```bash
-# Извлечь owner и repo из URL
-# https://github.com/user/repo → owner=user, repo=repo
 OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/([^/]+)/.*|\1|')
 REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com/[^/]+/([^/.]+).*|\1|')
 ```
 
-> **КРИТИЧЕСКИ ВАЖНО:** Используй эндпоинт `PUT applications/{id}/github` (GitHub App), а НЕ `POST application.update` с `sourceType: "github"`.
-> Эндпоинт `application.update` маршрутизирует через обычный git clone, который не имеет доступа к приватным репозиториям.
-> Эндпоинт `applications/{id}/github` использует установленный GitHub App для аутентификации.
+#### Выбор стратегии
 
 ```bash
-bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
+# Проверить установлен ли GitHub App
+PROVIDERS=$(bash scripts/dokploy-api.sh "$SERVER" GET "gitProvider.getAll")
+GITHUB_ID=$(echo "$PROVIDERS" | jq -r '[.[] | select(.providerType == "github")][0].githubId // empty')
+```
+
+#### Path A: GitHub App доступен (GITHUB_ID не пустой)
+
+```bash
+bash scripts/dokploy-api.sh "$SERVER" POST application.saveGithubProvider '{
+  "applicationId": "'"$APP_ID"'",
   "owner": "'"$OWNER"'",
-  "repo": "'"$REPO"'",
-  "branch": "'"$BRANCH"'"
+  "repository": "'"$REPO"'",
+  "branch": "'"$BRANCH"'",
+  "buildPath": "/",
+  "githubId": "'"$GITHUB_ID"'",
+  "triggerType": "push",
+  "enableSubmodules": false
 }'
 ```
 
-> **Для Docker Compose проектов из GitHub** используй аналогичный эндпоинт:
-> ```bash
-> bash scripts/dokploy-api.sh "$SERVER" PUT "compose/${COMPOSE_ID}/github" '{
->   "owner": "'"$OWNER"'",
->   "repo": "'"$REPO"'",
->   "branch": "'"$BRANCH"'"
-> }'
-> ```
+#### Path B: Без GitHub App, публичный репо
+
+```bash
+bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
+  "applicationId": "'"$APP_ID"'",
+  "sourceType": "git",
+  "customGitUrl": "https://github.com/'"$OWNER"'/'"$REPO"'.git",
+  "customGitBranch": "'"$BRANCH"'"
+}'
+```
+
+#### Path C: Без GitHub App, приватный репо с PAT
+
+```bash
+bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
+  "applicationId": "'"$APP_ID"'",
+  "sourceType": "git",
+  "customGitUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
+  "customGitBranch": "'"$BRANCH"'"
+}'
+```
+
+#### Path D: Manual Docker Deploy (без GitHub App, без PAT)
+
+См. `references/manual-docker-deploy.md` для полного руководства.
+
+> **ВАЖНО:** НЕ используй `sourceType: "github"` без `saveGithubProvider` — вызовет "Github Provider not found".
+> **ВАЖНО:** `file://` URL НЕ поддерживаются Dokploy.
+
+> **Для Docker Compose проектов** используй `compose.saveGithubProvider` аналогично.
 
 ### 3.5 Установить тип билда
 
@@ -418,12 +463,17 @@ bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/github" '{
 bash scripts/dokploy-api.sh "$SERVER" POST application.saveBuildType '{
   "applicationId": "'"$APP_ID"'",
   "buildType": "'"$BUILD_TYPE"'",
+  "dockerfile": "Dockerfile",
   "dockerContextPath": "",
-  "dockerBuildStage": ""
+  "dockerBuildStage": "",
+  "herokuVersion": "24",
+  "railpackVersion": "0.15.4"
 }'
 ```
 
-> **Обязательно (v0.27+):** Поля `dockerContextPath` и `dockerBuildStage` обязательны. Для не-Docker билдов передавай пустые строки `""`.
+> **ОБЯЗАТЕЛЬНО (v0.28+):** Все семь полей обязательны для любого типа билда.
+> Даже для `nixpacks` билдов поля `dockerfile`, `herokuVersion` и `railpackVersion`
+> должны присутствовать с дефолтными значениями. Zod-схема отклоняет запросы без любого из этих полей.
 
 Где `$BUILD_TYPE` — один из: `nixpacks`, `dockerfile`, `railpack`, `heroku_buildpacks`, `paketo_buildpacks`, `static`.
 
@@ -447,7 +497,10 @@ done
 
 bash scripts/dokploy-api.sh "$SERVER" POST application.saveEnvironment '{
   "applicationId": "'"$APP_ID"'",
-  "env": "'"$(echo -e "$ENV_STRING")"'"
+  "env": "'"$(echo -e "$ENV_STRING")"'",
+  "buildArgs": "",
+  "buildSecrets": "",
+  "createEnvFile": true
 }'
 ```
 
@@ -608,7 +661,7 @@ Next steps:
 ```
 
 После настройки GitHub App:
-- Эндпоинт `PUT applications/{id}/github` с `owner`/`repo`/`branch` работает с приватными репо
+- Используй `application.saveGithubProvider` с `githubId` из `gitProvider.getAll`
 - Автодеплой через GitHub App webhooks (не нужен отдельный webhook)
 - GitHub App обеспечивает аутентификацию автоматически — не нужны PAT или SSH ключи
 
@@ -630,16 +683,17 @@ Next steps:
 # Клонировать для анализа
 git clone --depth 1 "https://$GITHUB_PAT@github.com/$OWNER/$REPO.git" "$TEMP_DIR"
 
-# Настроить в Dokploy через git-эндпоинт с customGitUrl
-bash scripts/dokploy-api.sh "$SERVER" PUT "applications/${APP_ID}/git" '{
-  "provider": "github",
-  "repositoryUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
-  "branch": "'"$BRANCH"'"
+# Настроить в Dokploy через customGitUrl
+bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
+  "applicationId": "'"$APP_ID"'",
+  "sourceType": "git",
+  "customGitUrl": "https://'"$GITHUB_PAT"'@github.com/'"$OWNER"'/'"$REPO"'.git",
+  "customGitBranch": "'"$BRANCH"'"
 }'
 ```
 
-> **Примечание:** Это использует git-эндпоинт (не GitHub App). Токен сохраняется в Dokploy. Ротация — вручную. При истечении токена деплой перестанет работать.
-> **Рекомендация:** Лучше настроить GitHub App (Вариант A) — тогда можно использовать `PUT applications/{id}/github`.
+> **Примечание:** Токен сохраняется в Dokploy. Ротация — вручную.
+> **Рекомендация:** Лучше настроить GitHub App (Вариант A) — тогда используй `application.saveGithubProvider`.
 
 ### Вариант C (fallback): Локальная сборка + Docker Compose raw
 
@@ -718,7 +772,7 @@ bash scripts/dokploy-api.sh "$SERVER" POST compose.update '{
   "composeId": "'"$COMPOSE_ID"'",
   "sourceType": "raw",
   "composePath": "docker-compose.yml",
-  "customCompose": '"$COMPOSE_YAML_ESCAPED"'
+  "composeFile": '"$COMPOSE_YAML_ESCAPED"'
 }'
 
 # 4. Деплой

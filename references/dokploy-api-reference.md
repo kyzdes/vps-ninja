@@ -1,5 +1,12 @@
 # Dokploy API Reference
 
+> **CRITICAL: Dokploy uses tRPC — ALL mutations use HTTP POST**
+>
+> Despite conventional REST naming, Dokploy's API is built on tRPC.
+> ALL endpoints that modify data (create, update, delete, deploy, save*) use POST.
+> Only read-only endpoints (*.one, *.all, *.version) use GET.
+> There are NO PUT or DELETE HTTP methods in the Dokploy API.
+
 Справочник основных Dokploy REST API endpoints, используемых в VPS Ninja.
 
 Полная документация: https://docs.dokploy.com/docs/api
@@ -103,7 +110,7 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 ]
 ```
 
-### `DELETE project.remove`
+### `POST project.remove`
 
 Удалить проект (вместе со всеми вложенными ресурсами).
 
@@ -148,8 +155,6 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 
 Обновить настройки приложения (autoDeploy и другие флаги).
 
-> **ВАЖНО:** Для настройки Git-репозитория используй отдельные эндпоинты `PUT applications/{id}/github` или `PUT applications/{id}/git` (см. ниже). НЕ используй `application.update` с `sourceType` — это работает через обычный git clone без GitHub App аутентификации.
-
 **Request:**
 ```json
 {
@@ -158,20 +163,57 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 }
 ```
 
-### `PUT applications/{id}/github` (GitHub App)
+---
 
-Настроить GitHub-репозиторий через GitHub App. Использует установленный GitHub App для аутентификации — **работает с приватными репозиториями**.
+## Git Providers
 
-> **Это основной эндпоинт для GitHub-репозиториев.** Требует установленный GitHub App в Dokploy (Settings > Server > GitHub).
+### `GET gitProvider.getAll`
+
+Get all configured git providers (GitHub App, GitLab, Bitbucket, Gitea).
+
+**Response:**
+```json
+[
+  {
+    "gitProviderId": "gp1",
+    "providerType": "github",
+    "githubId": "gh123",
+    "name": "Dokploy-2026-02-19-xxxxx",
+    "createdAt": "2026-02-19T..."
+  }
+]
+```
+
+> Use `githubId` (NOT `gitProviderId`) when calling `application.saveGithubProvider`.
+> If the array is empty or has no entry with `providerType: "github"`, the GitHub App is not installed.
+
+### `POST application.saveGithubProvider`
+
+Configure GitHub repository via the installed GitHub App. Requires `githubId` from `gitProvider.getAll`.
+
+**Prerequisites:**
+1. GitHub App must be installed in Dokploy (Settings > Server > GitHub)
+2. Get `githubId`: `GET gitProvider.getAll` -> find entry with `providerType: "github"` -> use `.githubId`
 
 **Request:**
 ```json
 {
-  "owner": "user",
-  "repo": "my-app",
-  "branch": "main"
+  "applicationId": "app1",
+  "owner": "github-user-or-org",
+  "repository": "repo-name",
+  "branch": "main",
+  "buildPath": "/",
+  "githubId": "<from gitProvider.getAll>",
+  "triggerType": "push",
+  "enableSubmodules": false
 }
 ```
+
+> **Field notes:**
+> - `repository` is the repo name only (not a URL, not `owner/repo`)
+> - `githubId` is from `gitProvider.getAll`, NOT `gitProviderId`
+> - `triggerType`: "push" for auto-deploy on push
+> - `buildPath`: "/" for root, or "/packages/frontend" for monorepo
 
 **Response:**
 ```json
@@ -180,56 +222,58 @@ ENVIRONMENT_ID=$(echo "$RESPONSE" | jq -r '.environment.environmentId // empty')
 }
 ```
 
-**Пример использования:**
-```bash
-bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
-  "owner": "user",
-  "repo": "my-app",
-  "branch": "main"
-}'
-```
+### Using `application.update` for Git source (no GitHub App)
 
-### `PUT applications/{id}/git` (Generic Git)
+When GitHub App is not installed, configure the git source via `application.update`:
 
-Настроить Git-репозиторий через обычный git clone. Для приватных репозиториев требует PAT в URL или SSH-ключ.
-
-> **Используй только если GitHub App не установлен** (fallback). Для GitHub-репозиториев предпочтительно использовать `PUT applications/{id}/github`.
-
-**Request:**
+**For public repos:**
 ```json
+POST application.update
 {
-  "provider": "github",
-  "repositoryUrl": "https://github.com/user/repo.git",
-  "branch": "main"
+  "applicationId": "app1",
+  "sourceType": "git",
+  "customGitUrl": "https://github.com/user/repo.git",
+  "customGitBranch": "main"
 }
 ```
 
-**Для приватных репозиториев через PAT:**
+**For private repos with PAT:**
 ```json
+POST application.update
 {
-  "provider": "github",
-  "repositoryUrl": "https://<github-pat>@github.com/user/repo.git",
-  "branch": "main"
+  "applicationId": "app1",
+  "sourceType": "git",
+  "customGitUrl": "https://<PAT>@github.com/user/repo.git",
+  "customGitBranch": "main"
 }
 ```
 
-**Поддерживаемые провайдеры:** `github`, `gitlab`, `bitbucket`, `gitea`
+> **WARNING:** Do NOT use `sourceType: "github"` without first calling
+> `application.saveGithubProvider` with a valid `githubId`.
+> Using `sourceType: "github"` alone triggers "Github Provider not found" on deploy.
+>
+> **WARNING:** `file://` URLs are NOT supported by Dokploy. Only `https://` and `ssh://` URLs work.
 
 ### `POST application.saveBuildType`
 
 Установить тип билда.
 
-**Request (v0.27+):**
+**Request (v0.28+):**
 ```json
 {
   "applicationId": "app1",
   "buildType": "nixpacks",
+  "dockerfile": "Dockerfile",
   "dockerContextPath": "",
-  "dockerBuildStage": ""
+  "dockerBuildStage": "",
+  "herokuVersion": "24",
+  "railpackVersion": "0.15.4"
 }
 ```
 
-> **Обязательно:** Поля `dockerContextPath` и `dockerBuildStage` обязательны даже для не-Docker build types. Передавай пустые строки `""`.
+> **REQUIRED (v0.28+):** All seven fields are mandatory regardless of build type.
+> Even for `nixpacks` builds, `dockerfile`, `herokuVersion`, and `railpackVersion`
+> must be present with default values. The Zod schema rejects requests missing any of these.
 
 Для `dockerfile` можно указать реальные значения:
 ```json
@@ -239,7 +283,8 @@ bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
   "dockerfile": "Dockerfile",
   "dockerContextPath": ".",
   "dockerBuildStage": "",
-  "dockerBuildArgs": "ARG1=value1\nARG2=value2"
+  "herokuVersion": "24",
+  "railpackVersion": "0.15.4"
 }
 ```
 
@@ -249,15 +294,21 @@ bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
 
 Установить env-переменные.
 
-**Request:**
+**Request (v0.28+):**
 ```json
 {
   "applicationId": "app1",
-  "env": "DATABASE_URL=postgresql://...\nNODE_ENV=production\nSECRET_KEY=abc123"
+  "env": "DATABASE_URL=postgresql://...\nNODE_ENV=production\nSECRET_KEY=abc123",
+  "buildArgs": "",
+  "buildSecrets": "",
+  "createEnvFile": true
 }
 ```
 
-Формат: ключ=значение, разделитель — `\n` (перевод строки).
+> **REQUIRED (v0.28+):** Fields `buildArgs`, `buildSecrets`, and `createEnvFile` are mandatory.
+> Without them, the Zod schema returns HTTP 400 with fieldErrors.
+
+Формат `env`: ключ=значение, разделитель — `\n` (перевод строки).
 
 ### `POST application.deploy`
 
@@ -335,7 +386,7 @@ bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
 }
 ```
 
-### `DELETE application.delete`
+### `POST application.delete`
 
 Удалить приложение.
 
@@ -372,33 +423,27 @@ bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
 }
 ```
 
-### `PUT compose/{id}/github` (GitHub App)
+### `POST compose.saveGithubProvider`
 
-Настроить GitHub-репозиторий для compose-проекта через GitHub App.
+Настроить GitHub-репозиторий для compose-проекта через GitHub App. Аналогично `application.saveGithubProvider`.
 
 **Request:**
 ```json
 {
+  "composeId": "comp1",
   "owner": "user",
-  "repo": "my-app",
-  "branch": "main"
+  "repository": "repo-name",
+  "branch": "main",
+  "composePath": "docker-compose.yml",
+  "githubId": "<from gitProvider.getAll>"
 }
-```
-
-**Пример:**
-```bash
-bash scripts/dokploy-api.sh main PUT "compose/${COMPOSE_ID}/github" '{
-  "owner": "user",
-  "repo": "my-app",
-  "branch": "main"
-}'
 ```
 
 ### `POST compose.update`
 
 Обновить настройки compose-проекта (composePath, raw YAML и другие флаги).
 
-> **ВАЖНО:** Для настройки GitHub-репозитория используй `PUT compose/{id}/github`. Не используй `compose.update` с `sourceType: "github"` — это работает через обычный git clone.
+> **ВАЖНО:** Для настройки GitHub-репозитория используй `compose.saveGithubProvider` (требует `githubId` из `gitProvider.getAll`).
 
 **Для raw-режима (inline YAML):**
 ```json
@@ -406,9 +451,12 @@ bash scripts/dokploy-api.sh main PUT "compose/${COMPOSE_ID}/github" '{
   "composeId": "comp1",
   "sourceType": "raw",
   "composePath": "docker-compose.yml",
-  "customCompose": "version: '3.8'\nservices:\n  app:\n    image: my-app:latest\n    ports:\n      - '3000:3000'\n    networks:\n      - dokploy-network\nnetworks:\n  dokploy-network:\n    external: true"
+  "composeFile": "services:\n  app:\n    image: my-app:latest\n    ports:\n      - '3000:3000'\n    networks:\n      - dokploy-network\nnetworks:\n  dokploy-network:\n    external: true"
 }
 ```
+
+> **CRITICAL:** Поле для YAML — `composeFile`, НЕ `customCompose`.
+> Использование `customCompose` молча игнорируется — создаётся пустой docker-compose.yml, деплой падает с ошибкой "Compose file not found".
 
 > **Raw-режим** используется когда нет Git-репозитория: локально собранные образы, приватные репо без токена, или кастомные multi-container конфигурации.
 
@@ -423,7 +471,7 @@ bash scripts/dokploy-api.sh main PUT "compose/${COMPOSE_ID}/github" '{
 }
 ```
 
-### `DELETE compose.remove`
+### `POST compose.remove`
 
 Удалить compose-проект.
 
@@ -505,7 +553,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 }
 ```
 
-### `DELETE domain.delete`
+### `POST domain.delete`
 
 Удалить домен.
 
@@ -578,7 +626,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 }
 ```
 
-### `DELETE postgres.remove`
+### `POST postgres.remove`
 
 Удалить PostgreSQL.
 
@@ -597,7 +645,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 - `POST mysql.create` (требует `environmentId`, `databasePassword`)
 - `POST mysql.deploy`
 - `GET mysql.one`
-- `DELETE mysql.remove`
+- `POST mysql.remove`
 
 ---
 
@@ -606,7 +654,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 - `POST mariadb.create` (требует `environmentId`, `databasePassword`)
 - `POST mariadb.deploy`
 - `GET mariadb.one`
-- `DELETE mariadb.remove`
+- `POST mariadb.remove`
 
 ---
 
@@ -615,7 +663,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 - `POST mongo.create` (требует `environmentId`, `databasePassword`)
 - `POST mongo.deploy`
 - `GET mongo.one`
-- `DELETE mongo.remove`
+- `POST mongo.remove`
 
 ---
 
@@ -659,7 +707,7 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 ?redisId=redis1
 ```
 
-### `DELETE redis.remove`
+### `POST redis.remove`
 
 **Request:**
 ```json
@@ -696,6 +744,14 @@ echo "https://<dokploy-url>/api/deploy/compose/$REFRESH_TOKEN"
 ### `GET deployment.logsByDeployment`
 
 Получить логи деплоя.
+
+> **NOTE:** Этот endpoint может не работать в некоторых версиях Dokploy.
+> **Основной метод:** Читать логи через SSH по пути из `logPath` в ответе `deployment.all`:
+> ```bash
+> LOG_PATH=$(echo "$RESPONSE" | jq -r '.[0].logPath')
+> bash scripts/ssh-exec.sh "$SERVER" "cat $LOG_PATH"
+> ```
+> Используй API endpoint только как fallback.
 
 **Request (query params):**
 ```
@@ -760,25 +816,49 @@ APP=$(bash scripts/dokploy-api.sh main POST application.create '{
 }')
 APP_ID=$(echo "$APP" | jq -r '.applicationId')
 
-# 6. Настроить GitHub (через GitHub App)
-bash scripts/dokploy-api.sh main PUT "applications/${APP_ID}/github" '{
-  "owner":"user",
-  "repo":"my-saas",
-  "branch":"main"
-}'
+# 6. Настроить GitHub (через GitHub App — если установлен)
+GITHUB_ID=$(bash scripts/dokploy-api.sh main GET "gitProvider.getAll" | \
+  jq -r '[.[] | select(.providerType == "github")][0].githubId // empty')
 
-# 7. Установить buildType (dockerContextPath и dockerBuildStage обязательны)
+if [ -n "$GITHUB_ID" ]; then
+  bash scripts/dokploy-api.sh main POST application.saveGithubProvider '{
+    "applicationId":"'"$APP_ID"'",
+    "owner":"user",
+    "repository":"my-saas",
+    "branch":"main",
+    "buildPath":"/",
+    "githubId":"'"$GITHUB_ID"'",
+    "triggerType":"push",
+    "enableSubmodules":false
+  }'
+else
+  # Fallback: customGitUrl для публичных репо
+  bash scripts/dokploy-api.sh main POST application.update '{
+    "applicationId":"'"$APP_ID"'",
+    "sourceType":"git",
+    "customGitUrl":"https://github.com/user/my-saas.git",
+    "customGitBranch":"main"
+  }'
+fi
+
+# 7. Установить buildType (все 7 полей обязательны в v0.28+)
 bash scripts/dokploy-api.sh main POST application.saveBuildType '{
   "applicationId":"'"$APP_ID"'",
   "buildType":"nixpacks",
+  "dockerfile":"Dockerfile",
   "dockerContextPath":"",
-  "dockerBuildStage":""
+  "dockerBuildStage":"",
+  "herokuVersion":"24",
+  "railpackVersion":"0.15.4"
 }'
 
-# 8. Установить env
+# 8. Установить env (все 5 полей обязательны в v0.28+)
 bash scripts/dokploy-api.sh main POST application.saveEnvironment '{
   "applicationId":"'"$APP_ID"'",
-  "env":"DATABASE_URL='"$DB_URL"'\nNODE_ENV=production"
+  "env":"DATABASE_URL='"$DB_URL"'\nNODE_ENV=production",
+  "buildArgs":"",
+  "buildSecrets":"",
+  "createEnvFile":true
 }'
 
 # 9. Создать DNS-запись (БЕЗ proxy для Let's Encrypt!)
@@ -822,7 +902,7 @@ bash scripts/dokploy-api.sh main POST compose.update '{
   "composeId":"'"$COMPOSE_ID"'",
   "sourceType":"raw",
   "composePath":"docker-compose.yml",
-  "customCompose":"version: '\''3.8'\''\nservices:\n  app:\n    image: my-app:latest\n    ports:\n      - '\''3000:3000'\''\n    networks:\n      - dokploy-network\nnetworks:\n  dokploy-network:\n    external: true"
+  "composeFile":"services:\n  app:\n    image: my-app:latest\n    ports:\n      - '\''3000:3000'\''\n    networks:\n      - dokploy-network\nnetworks:\n  dokploy-network:\n    external: true"
 }'
 
 # 4. Деплой

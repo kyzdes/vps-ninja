@@ -48,9 +48,15 @@ if [ -z "$URL" ] || [ -z "$KEY" ]; then
   exit 1
 fi
 
+# Dynamic timeout — longer for mutation endpoints that may take time
+MAX_TIME=30
+if echo "$ENDPOINT" | grep -qE 'update|deploy|saveBuildType|saveEnvironment|saveGithubProvider|remove|delete'; then
+  MAX_TIME=60
+fi
+
 CURL_ARGS=(
   -s -S
-  --max-time 30
+  --max-time "$MAX_TIME"
   --retry 2
   --retry-delay 3
   -X "$METHOD"
@@ -74,6 +80,13 @@ BODY_RESP=$(echo "$RESPONSE" | sed '$d')
 
 # Handle HTTP errors with informative output
 if [ "$HTTP_CODE" -ge 400 ] 2>/dev/null; then
+  # Parse tRPC/Zod validation errors for clearer messages
+  if echo "$BODY_RESP" | jq -e '.data.zodError.fieldErrors' >/dev/null 2>&1; then
+    FIELD_ERRORS=$(echo "$BODY_RESP" | jq -r '.data.zodError.fieldErrors | to_entries | map("\(.key): \(.value[0])") | join(", ")' 2>/dev/null)
+    echo "{\"error\": \"Validation error: $FIELD_ERRORS\", \"hint\": \"Check required fields in API reference\", \"endpoint\": \"$ENDPOINT\"}" >&2
+    exit 2
+  fi
+
   # Try to extract error message from JSON response
   ERROR_MSG=""
   if echo "$BODY_RESP" | jq -e . >/dev/null 2>&1; then
