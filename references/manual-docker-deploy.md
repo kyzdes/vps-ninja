@@ -267,6 +267,18 @@ bash scripts/ssh-exec.sh "$SERVER" "ls -t /etc/dokploy/logs/$APP_NAME/ | head -1
 bash scripts/wait-ready.sh "https://$DOMAIN" 120 10
 ```
 
+### 10. Smoke test (опционально)
+
+```bash
+# Проверить что приложение отвечает корректно (не просто 200)
+BODY=$(curl -s "https://$DOMAIN" 2>/dev/null | head -100)
+if echo "$BODY" | grep -qiE '<html|<!doctype|"status":"ok"|"ok":true'; then
+  echo "Smoke test passed"
+else
+  echo "WARNING: App responds but content may be incorrect. Check manually."
+fi
+```
+
 ---
 
 ## Повторный деплой (обновление)

@@ -16,6 +16,10 @@
 # Reads credentials from config/servers.json (relative to script location)
 # Returns: JSON response from Dokploy API (or extracted field if --extract is used)
 # Exit codes: 0 = success, 1 = config error, 2 = HTTP error, 3 = network error, 4 = invalid JSON response
+#
+# Security note: The API key is passed via -H header on the command line, which is
+# briefly visible in `ps` output. This is acceptable for a short-lived CLI tool.
+# For production automation, consider using a secrets manager or --header @- with heredoc.
 
 set -euo pipefail
 

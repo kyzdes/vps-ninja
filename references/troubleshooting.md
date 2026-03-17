@@ -219,6 +219,25 @@ API key might be expired or invalid. User needs to:
 
 ---
 
+## Rollback to Previous Deployment
+
+If a deploy breaks the app:
+
+```bash
+# Get deployment history
+RESPONSE=$(bash scripts/dokploy-api.sh <server> GET "deployment.all?applicationId=<id>")
+
+# Find the last successful deployment
+echo "$RESPONSE" | jq '[.[] | select(.status == "done")][0]'
+
+# Redeploy (rebuilds from same commit/state)
+bash scripts/dokploy-api.sh <server> POST application.redeploy '{"applicationId":"<id>"}'
+```
+
+> Dokploy `redeploy` rebuilds from the current repository state. If you need to roll back to a specific commit, checkout that commit in the repo and then trigger deploy.
+
+---
+
 ## SSH Connection Drops During Long Operations
 
 ### Проблема

@@ -51,15 +51,31 @@ cf_curl() {
   curl "${args[@]}" "${CF_API}/${path}"
 }
 
+# Get zone ID by domain (raw — no error output, used for probing)
+_get_zone_id_raw() {
+  local zone_domain=$1
+  cf_curl GET "zones?name=${zone_domain}&status=active" | jq -r '.result[0].id // empty'
+}
+
 # Extract zone domain from full domain (app.example.com → example.com)
+# Handles multi-part TLDs (app.example.co.uk → example.co.uk) by probing CloudFlare API
 get_zone_domain() {
-  echo "$1" | awk -F. '{print $(NF-1)"."$NF}'
+  local domain="$1"
+  # Try 2-part TLD first (most common: example.com, example.dev)
+  local zone2=$(echo "$domain" | awk -F. '{print $(NF-1)"."$NF}')
+  local id2=$(_get_zone_id_raw "$zone2")
+  if [ -n "$id2" ]; then echo "$zone2"; return; fi
+  # Try 3-part TLD (example.co.uk, example.com.br)
+  local zone3=$(echo "$domain" | awk -F. '{print $(NF-2)"."$(NF-1)"."$NF}')
+  local id3=$(_get_zone_id_raw "$zone3")
+  if [ -n "$id3" ]; then echo "$zone3"; return; fi
+  # Fallback to 2-part (will fail later with "Zone not found" if wrong)
+  echo "$zone2"
 }
 
 # Get zone ID by domain
 get_zone_id() {
-  local zone_domain=$1
-  cf_curl GET "zones?name=${zone_domain}&status=active" | jq -r '.result[0].id // empty'
+  _get_zone_id_raw "$1"
 }
 
 # Find DNS record by name

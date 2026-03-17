@@ -4,6 +4,8 @@
 
 Цель: Задеплоить проект из GitHub-репозитория на VPS с автоматическим определением стека, настройкой env-переменных, DNS и SSL.
 
+> **Dry run:** Если передан `--dry-run`, покажи план деплоя (стек, порт, env-переменные, DNS-изменения, ресурсы для создания) БЕЗ выполнения каких-либо изменений. Запроси подтверждение у пользователя перед продолжением.
+
 ---
 
 ## Парсинг аргументов
@@ -456,6 +458,7 @@ bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
 > **ВАЖНО:** `file://` URL НЕ поддерживаются Dokploy.
 
 > **Для Docker Compose проектов** используй `compose.saveGithubProvider` аналогично.
+> **Note:** `compose.saveGithubProvider` не верифицирован на всех версиях Dokploy. Если возвращает 404, используй Path B/C/D.
 
 ### 3.5 Установить тип билда
 
@@ -573,8 +576,15 @@ while true; do
     break
   elif [ "$STATUS" = "error" ]; then
     echo "Билд упал. Логи:"
-    DEPLOYMENT_ID=$(echo "$RESPONSE" | jq -r '.[0].deploymentId')
-    bash scripts/dokploy-api.sh "$SERVER" GET "deployment.logsByDeployment?deploymentId=$DEPLOYMENT_ID" | tail -50
+    # Primary: SSH + logPath (надёжнее API)
+    LOG_PATH=$(echo "$RESPONSE" | jq -r '.[0].logPath // empty')
+    if [ -n "$LOG_PATH" ]; then
+      bash scripts/ssh-exec.sh "$SERVER" "tail -100 $LOG_PATH"
+    else
+      # Fallback: API метод (может не работать в некоторых версиях)
+      DEPLOYMENT_ID=$(echo "$RESPONSE" | jq -r '.[0].deploymentId')
+      bash scripts/dokploy-api.sh "$SERVER" GET "deployment.logsByDeployment?deploymentId=$DEPLOYMENT_ID" | tail -50
+    fi
     exit 1
   else
     echo "  Статус: $STATUS..."
@@ -614,7 +624,14 @@ bash scripts/dokploy-api.sh "$SERVER" POST application.update '{
 
 > **Do NOT suggest webhook setup, refresh tokens, or GitHub Actions.** The GitHub App installed in Dokploy handles auto-deploy natively. See `references/github-app-autodeploy.md`.
 
-### 3.13 Final report
+### 3.13 Cleanup
+
+```bash
+# Remove temp directory used for analysis
+rm -rf "$TEMP_DIR"
+```
+
+### 3.14 Final report
 
 ```
 Deploy complete!

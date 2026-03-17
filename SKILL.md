@@ -6,8 +6,12 @@ description: >
   from GitHub, manage domains/DNS, create databases, check server status,
   view logs, or remove deployed projects. Also use when the user mentions
   re-deploying, checking deploy status, adding environment variables, or
-  troubleshooting a deployed app. Triggers on: VPS, deploy, server setup,
-  Dokploy, hosting, domain, DNS, redeploy, server status, deploy logs.
+  troubleshooting a deployed app. Also triggers when users say things like
+  "put this on my server", "I need hosting", "make this accessible online",
+  "my site is down", "set up CI/CD for deployment", or anything related to
+  getting code running on a remote server. Triggers on: VPS, deploy, server
+  setup, Dokploy, hosting, domain, DNS, redeploy, server status, deploy logs,
+  "put online", "host this", "site down", CI/CD.
 argument-hint: "[setup|deploy|domain|db|status|logs|destroy|config] [args...]"
 disable-model-invocation: true
 allowed-tools:
@@ -124,6 +128,9 @@ This skill includes comprehensive Dokploy API reference and guides in `reference
 6. `references/troubleshooting.md` — SSL, DNS, build errors, common issues
 7. `references/manual-docker-deploy.md` — Fallback deploy without GitHub integration
 
+> **Note:** The `mcp-server/docs/` directory may contain outdated API references from v3.
+> Always prefer the `references/` directory above for up-to-date documentation.
+
 **If the built-in docs don't cover something** (e.g., a brand-new Dokploy feature), use the Dokploy MCP server if available, or Context7:
 ```
 Tool: mcp__plugin_context7_context7__query-docs
@@ -214,10 +221,12 @@ Or determine from the path to this SKILL.md file.
 #### `config` (no args)
 Show current config (without secrets):
 ```bash
-cat config/servers.json | jq 'del(.servers[].dokploy_api_key, .cloudflare.api_token)'
+cat config/servers.json | jq 'del(.servers[].dokploy_api_key, .servers[].ssh_key, .cloudflare.api_token)'
 ```
 
 #### `config server add <name> <ip> [--ssh-key <path>]`
+> Validate IP format before saving: `[[ "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]`
+
 Add server to config:
 ```json
 {
@@ -243,7 +252,7 @@ Set default server.
 
 ### `/vps domain` — Domain management
 
-#### `domain add <full-domain> <project-name> [--port <port>]`
+#### `domain add <full-domain> <project-name> [--port <port>] [--server <name>]`
 
 1. Read config, get default server
 2. Find applicationId by project name via `project.all`
@@ -278,7 +287,7 @@ Show all domains across projects.
 
 Supported types: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`
 
-#### `db create <type> <name> [--project <project-name>]`
+#### `db create <type> <name> [--project <project-name>] [--server <name>]`
 
 1. Find projectId and environmentId
 2. Create via Dokploy API (all `*.create` calls require `environmentId`)
@@ -295,9 +304,15 @@ Delete database (after confirmation).
 
 ### `/vps status` — Server and project status
 
+**Syntax:** `status [--server <name>]`
+
 1. Get all projects via `project.all`
 2. Get server resources via SSH (CPU, RAM, Disk)
 3. Display formatted table
+4. **Warn if:**
+   - Disk usage > 80%: "Warning: Disk almost full. Run `docker system prune` to free space."
+   - RAM usage > 90%: "Warning: Low memory. Consider upgrading or reducing replicas."
+   - Docker images accumulating: show `docker system df` summary
 
 ---
 
@@ -312,7 +327,7 @@ Delete database (after confirmation).
 
 ### `/vps destroy` — Delete project
 
-**Syntax:** `destroy <project-name> [--keep-db] [--keep-dns]`
+**Syntax:** `destroy <project-name> [--keep-db] [--keep-dns] [--server <name>]`
 
 **Always** ask for confirmation before deleting.
 
@@ -334,7 +349,7 @@ Read and follow: `references/setup-guide.md`
 
 Read and follow: `references/deploy-guide.md` + `references/stack-detection.md`
 
-Key improvements in v3:
+Key improvements in v3.1:
 - After deploy, **do not suggest webhook setup** — GitHub App handles auto-deploy
 - The deploy report should mention: "Auto-deploy is active via GitHub App. Push to `<branch>` to trigger redeploy."
 - If user asks to redeploy, use `application.redeploy` API endpoint
@@ -350,15 +365,15 @@ Commands:
 
   /vps setup <ip> <password>              Set up a fresh VPS (install Dokploy)
   /vps deploy <github-url> [--domain D]   Deploy a GitHub project
-  /vps domain add <domain> <project>      Add domain to project
+  /vps domain add <domain> <project>      Add domain to project [--server S]
   /vps domain remove <domain>             Remove domain
   /vps domain list                        List all domains
-  /vps db create <type> <name>            Create DB (postgres/mysql/mongo/redis)
+  /vps db create <type> <name>            Create DB [--server S] [--project P]
   /vps db list                            List all databases
   /vps db delete <name>                   Delete database
   /vps status [--server <name>]           Server and project status
   /vps logs <project> [--build]           Application or build logs
-  /vps destroy <project>                  Delete project
+  /vps destroy <project>                  Delete project [--server S]
   /vps config                             Show configuration
   /vps config server add <name> <ip>      Add server
   /vps config cloudflare <token>          Configure CloudFlare API
