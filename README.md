@@ -1,0 +1,255 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/version-v3.1.1-00FF41?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/pass_rate-100%25-00FF41?style=flat-square" alt="Pass Rate" />
+  <img src="https://img.shields.io/badge/stacks-20+-blue?style=flat-square" alt="Stacks" />
+  <img src="https://img.shields.io/badge/license-MIT-gray?style=flat-square" alt="License" />
+</p>
+
+# VPS Ninja
+
+> One command to go from a GitHub repo to a live app with SSL, domain, and auto-deploy on push.
+
+```
+/vps deploy github.com/user/my-app --domain app.example.com
+```
+
+VPS Ninja is a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code/skills) that turns Claude into a DevOps engineer for your VPS. It automates the full lifecycle through [Dokploy](https://dokploy.com) and CloudFlare DNS — setup, deploy, domains, databases, monitoring, and teardown.
+
+---
+
+## Benchmarks
+
+We tested Claude with and without VPS Ninja across 3 real-world DevOps scenarios:
+
+<table>
+<tr>
+<td width="50%">
+
+### With VPS Ninja
+- Pass rate: **100%**
+- Reads built-in references instantly
+- Uses correct tRPC API calls
+- DNS `--no-proxy` for Let's Encrypt
+- Auto-deploy via GitHub App (no webhooks)
+
+</td>
+<td width="50%">
+
+### Without VPS Ninja
+- Pass rate: **24%**
+- Googles outdated Dokploy docs
+- Misses required API fields
+- Breaks SSL with CloudFlare proxy
+- Recommends manual webhook setup
+
+</td>
+</tr>
+</table>
+
+> **Most revealing test:** When asked about auto-deploy, naked Claude recommends setting up webhooks — the exact opposite of how Dokploy works. VPS Ninja correctly explains that the GitHub App handles it automatically.
+
+Full results: [`benchmarks/BENCHMARK.md`](benchmarks/BENCHMARK.md)
+
+---
+
+## Quick Start
+
+### 1. Install the skill
+
+```bash
+git clone https://github.com/kyzdes/vps-ninja.git ~/vps-ninja
+ln -s ~/vps-ninja ~/.claude/skills/vps
+```
+
+### 2. Install dependencies
+
+```bash
+# macOS
+brew install jq sshpass
+
+# Ubuntu/Debian
+sudo apt install jq sshpass
+```
+
+### 3. Set up your VPS
+
+```
+/vps setup <server-ip> <root-password>
+```
+
+Claude SSHs in, installs Dokploy, configures the firewall, and walks you through creating an admin account.
+
+### 4. Deploy
+
+```
+/vps deploy github.com/user/app --domain app.example.com
+```
+
+Claude detects your stack, creates the project in Dokploy, sets up DNS + SSL, deploys, and enables auto-deploy on push. Done.
+
+---
+
+## Commands
+
+| Command | Description |
+|:--------|:------------|
+| `/vps setup <ip> <password>` | Set up a fresh VPS with Dokploy |
+| `/vps deploy <url> [--domain D] [--dry-run]` | Deploy from GitHub |
+| `/vps domain add <domain> <project>` | Add domain with SSL |
+| `/vps domain remove <domain>` | Remove domain |
+| `/vps domain list` | List all domains |
+| `/vps db create <type> <name>` | Create database (postgres/mysql/mongo/redis) |
+| `/vps db list` | List databases |
+| `/vps db delete <name>` | Delete database |
+| `/vps status` | Server + project status with resource warnings |
+| `/vps logs <project> [--build]` | Runtime or build logs |
+| `/vps destroy <project>` | Delete project (with confirmation) |
+| `/vps config` | Manage servers and CloudFlare config |
+
+All commands support `--server <name>` for multi-server setups.
+
+---
+
+## Supported Stacks
+
+Auto-detected from your project files:
+
+| Runtime | Frameworks |
+|:--------|:-----------|
+| **Node.js** | Next.js, Nuxt, NestJS, Express, Remix, Vite, Astro |
+| **Python** | Django, FastAPI, Flask |
+| **Go** | Any Go project |
+| **Rust** | Any Rust project |
+| **Ruby** | Rails, Sinatra |
+| **Java** | Spring Boot, Maven, Gradle |
+| **.NET** | ASP.NET Core |
+| **PHP** | Laravel, Symfony |
+| **Docker** | Dockerfile or docker-compose.yml |
+
+---
+
+## How It Works
+
+```
+You: /vps deploy github.com/user/app --domain app.example.com
+
+VPS Ninja:
+  1. Clones repo, detects Next.js + Prisma + PostgreSQL
+  2. Asks for secret env vars (NEXTAUTH_SECRET, etc.)
+  3. Creates project + PostgreSQL in Dokploy
+  4. Connects repo via GitHub App (auto-deploy enabled)
+  5. Sets build type (Nixpacks) with all required API fields
+  6. Creates DNS A-record in CloudFlare (--no-proxy for SSL)
+  7. Adds domain with Let's Encrypt certificate
+  8. Deploys, monitors logs, verifies HTTPS
+
+Result: https://app.example.com is live
+        Auto-deploy active — push to main to redeploy
+```
+
+### Deployment fallback chain
+
+If the GitHub App isn't available, the skill automatically falls back:
+
+```
+GitHub App (recommended)
+  └─ Public git URL
+       └─ PAT-authenticated URL
+            └─ Manual Docker build on server
+```
+
+---
+
+## Architecture
+
+```
+VPS-NINJA/
+├── SKILL.md                    # Skill logic and command routing
+├── scripts/
+│   ├── dokploy-api.sh          # Dokploy tRPC API client (dynamic timeouts)
+│   ├── cloudflare-dns.sh       # CloudFlare DNS client (multi-part TLD support)
+│   ├── ssh-exec.sh             # SSH wrapper (normal/bg/poll modes)
+│   └── wait-ready.sh           # URL health checker
+├── references/                 # 7 built-in guides (primary source of truth)
+│   ├── deploy-guide.md         # 3-phase deploy workflow
+│   ├── setup-guide.md          # 10-step VPS setup
+│   ├── stack-detection.md      # Framework detection rules
+│   ├── dokploy-api-reference.md
+│   ├── github-app-autodeploy.md
+│   ├── troubleshooting.md
+│   └── manual-docker-deploy.md
+├── config/
+│   └── servers.json            # Credentials (gitignored)
+├── templates/
+│   └── setup-server.sh         # VPS init script
+├── mcp-server/                 # Optional Dokploy docs MCP server
+└── benchmarks/                 # Eval results and viewer
+```
+
+---
+
+## Security
+
+| Measure | Detail |
+|:--------|:-------|
+| Credentials | `servers.json` is gitignored, never committed |
+| Passwords | Passed via `SSHPASS` env var (not visible in `ps`) |
+| SSH | Command injection prevention via single-quote escaping |
+| API keys | Never shown in Claude's responses |
+| Destructive ops | `destroy` and `db delete` always require confirmation |
+| DNS changes | Preview shown before applying |
+
+---
+
+## Optional: MCP Server
+
+VPS Ninja includes a bundled MCP server for always-fresh Dokploy documentation:
+
+```bash
+cd ~/.claude/skills/vps/mcp-server && npm install
+```
+
+Add to `~/.claude/.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "dokploy-docs": {
+      "command": "node",
+      "args": ["<path-to>/mcp-server/index.js"]
+    }
+  }
+}
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|:---------|:------------|
+| [`PRD.md`](PRD.md) | Product requirements, architecture, all commands |
+| [`CHANGELOG.md`](CHANGELOG.md) | Full version history (v1 → v3.1.1) |
+| [`fixed-errors.md`](fixed-errors.md) | 9 production bugs: root cause + solution |
+| [`context-map.md`](context-map.md) | Technical deep-dive for contributors |
+| [`benchmarks/BENCHMARK.md`](benchmarks/BENCHMARK.md) | Benchmark methodology and results |
+
+---
+
+## Version History
+
+**Current: v3.1.1** (2026-03-18) — [Full changelog](CHANGELOG.md)
+
+- v3.1: Fixed GitHub App integration, 4-tier deploy fallback, command injection fix, `--dry-run` mode
+- v3.0: Built-in reference guides, MCP server, benchmarks (100% pass rate)
+- v2.0: Dokploy v0.27 compatibility (`environmentId`)
+- v1.0: Initial release — 8 commands, 20+ stacks
+
+---
+
+## License
+
+MIT
+
+## Contributing
+
+PRs welcome. If you find a bug or want to add support for a new stack, [open an issue](https://github.com/kyzdes/vps-ninja/issues).
