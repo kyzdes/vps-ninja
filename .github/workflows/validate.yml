@@ -1,0 +1,30 @@
+name: validate
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check SKILL.md exists
+        run: test -f skills/vps/SKILL.md
+
+      - name: Validate plugin.json
+        run: jq -e '.name and .version and .description' .claude-plugin/plugin.json
+
+      - name: Validate gemini-extension.json
+        run: |
+          jq -e '.name and .version and .contextFileName' gemini-extension.json
+          test "$(jq -r .contextFileName gemini-extension.json)" = "GEMINI.md"
+
+      - name: Check mirror parity (AGENTS.md, GEMINI.md == SKILL.md)
+        run: |
+          diff skills/vps/SKILL.md AGENTS.md
+          diff skills/vps/SKILL.md GEMINI.md
+
+      - name: Check SKILL.md frontmatter parses
+        run: |
+          head -30 skills/vps/SKILL.md | grep -q '^---$'
+          head -30 skills/vps/SKILL.md | grep -q '^name:'
+          head -30 skills/vps/SKILL.md | grep -q '^description:'

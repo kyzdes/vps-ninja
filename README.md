@@ -1,3 +1,28 @@
+# vps-ninja
+
+> Deploy and manage applications on VPS servers with Dokploy (Claude Code / Codex / Gemini skill).
+
+## Install
+
+### Claude Code
+
+    /plugin install https://github.com/kyzdes/vps-ninja
+    # or via marketplace:
+    /plugin marketplace add kyzdes/marketplace-skills
+    /plugin install vps-ninja@kyzdes-skills
+
+### Codex CLI / Gemini CLI
+
+    curl -sSL https://raw.githubusercontent.com/kyzdes/marketplace-skills/main/install.sh \
+      | bash -s <codex|gemini> vps-ninja
+
+## Updates
+
+Claude: `/plugin update vps-ninja`
+Codex/Gemini: `install.sh update <agent>`
+
+---
+
 <p align="center">
   <img src="https://img.shields.io/badge/version-v3.1.1-00FF41?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/pass_rate-100%25-00FF41?style=flat-square" alt="Pass Rate" />
