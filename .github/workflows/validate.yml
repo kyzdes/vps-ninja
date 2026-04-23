@@ -10,6 +10,13 @@ jobs:
       - name: Check SKILL.md exists
         run: test -f skills/vps/SKILL.md
 
+      - name: Check skill resource dirs present
+        run: |
+          test -d skills/vps/scripts
+          test -d skills/vps/references
+          test -d skills/vps/templates
+          test -d skills/vps/config
+
       - name: Validate plugin.json
         run: jq -e '.name and .version and .description' .claude-plugin/plugin.json
 
